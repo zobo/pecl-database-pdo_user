@@ -20,6 +20,7 @@
 
 #include "php_pdo_user_int.h"
 #include "php_pdo_user_sql.h"
+#include "pdo_user_arginfo.h"
 
 /* PHP 5.0 Compatability */
 #ifndef PHP_MALIAS
@@ -94,13 +95,13 @@ PHP_METHOD(pdo_user, driverparam)
 			if (val) {
 				php_error_docref(NULL TSRMLS_CC, E_WARNING, "Cannot override data source");
 			}
-			RETVAL_STRINGL(data->dbh->data_source, data->dbh->data_source_len, 1);
+			RETURN_STRINGL(data->dbh->data_source, data->dbh->data_source_len);
 
 			break;
 		}
 		case PHP_PDO_USER_DRIVER_PARAM_SQLSTATE:
 		{
-			RETVAL_STRING(data->dbh->error_code, 1);
+			RETVAL_STRING(data->dbh->error_code);
 			if (val) {
 				zval *strval = val, tmpval;
 
@@ -133,7 +134,7 @@ PHP_METHOD(pdo_user, driverparam)
 			}
 
 			if (data->stmt->active_query_string) {
-				RETVAL_STRINGL(data->stmt->active_query_string, data->stmt->active_query_stringlen, 1);
+				RETVAL_STR(data->stmt->active_query_string);
 			} else {
 				RETVAL_NULL();
 			}
@@ -147,7 +148,7 @@ PHP_METHOD(pdo_user, driverparam)
 				break;
 			}
 
-			RETVAL_STRING(data->stmt->error_code, 1);
+			RETVAL_STRING(data->stmt->error_code);
 			if (val) {
 				zval *strval = val, tmpval;
 
@@ -181,7 +182,7 @@ PHP_METHOD(pdo_user,parsedsn)
 {
     char *dsn;
     int dsn_len, num_opts, i;
-    zval *opts, **opt = NULL;
+    zval *opts, *opt = NULL;
     struct pdo_data_src_parser *vars;
     HashPosition pos;
 
@@ -197,15 +198,12 @@ PHP_METHOD(pdo_user,parsedsn)
 
     vars = safe_emalloc(num_opts, sizeof(struct pdo_data_src_parser), 0);
     for(zend_hash_internal_pointer_reset_ex(Z_ARRVAL_P(opts), &pos), num_opts =0;
-        zend_hash_get_current_data_ex(Z_ARRVAL_P(opts), (void**)&opt, &pos) == SUCCESS;
+        ((opt = zend_hash_get_current_data_ex(Z_ARRVAL_P(opts), &pos)) != NULL);
         zend_hash_move_forward_ex(Z_ARRVAL_P(opts), &pos)) {
-        zval copyval = **opt;
 
         /* Some data gets copied here that doesn't need to be (typically all of it I'd think)
          * But it's more convenient[lazy] than tracking what does... */
-        zval_copy_ctor(&copyval);
-        convert_to_string(&copyval);
-        vars[num_opts].optname = Z_STRVAL(copyval);
+        vars[num_opts].optname = Z_STRVAL_P(opt);
         vars[num_opts].optval = NULL;
         vars[num_opts].freeme = 0;
         num_opts++;
@@ -215,7 +213,7 @@ PHP_METHOD(pdo_user,parsedsn)
 
     for(i = 0; i < num_opts; i++) {
         if (vars[i].optval) {
-            add_assoc_string(return_value, (char*)vars[i].optname, vars[i].optval, !vars[i].freeme);
+            add_assoc_string(return_value, (char*)vars[i].optname, vars[i].optval);
         } else {
             add_assoc_null(return_value, (char*)vars[i].optname);
         }
@@ -246,16 +244,15 @@ PHP_METHOD(pdo_user,tokenizesql)
 
 	array_init(return_value);
 	while (PU_END != php_pdo_user_sql_get_token(&T, &token)) {
-		zval *tok;
+		zval tok;
 
 		if (token.id == PU_WHITESPACE && !include_whitespace) {
 			continue;
 		}
-		MAKE_STD_ZVAL(tok);
-		array_init(tok);
-		add_assoc_long(tok, "token", token.id);
-		add_assoc_stringl(tok, "data", token.token, token.token_len, !token.freeme);
-		add_next_index_zval(return_value, tok);
+		array_init(&tok);
+		add_assoc_long(&tok, "token", token.id);
+		add_assoc_stringl(&tok, "data", token.token, token.token_len);
+		add_next_index_zval(return_value, &tok);
 	}
 }
 /* }}} */
@@ -281,7 +278,7 @@ PHP_METHOD(pdo_user,tokenname)
 	 * Gonna have to step through the slow way... */
 	while (labels->label) {
 		if (labels->id == tokenid) {
-			RETURN_STRING(labels->label, 1);
+			RETURN_STRING(labels->label);
 		}
 		labels++;
 	}
@@ -298,6 +295,8 @@ static void pdo_user_free_wrapper(void *x) { efree(x); }
 Compile a SQL statement into a query structure */
 PHP_METHOD(pdo_user,parsesql)
 {
+	RETURN_NULL();
+#if 0
 	char *sql;
 	int sql_len;
 	php_pdo_user_sql_tokenizer T;
@@ -316,7 +315,7 @@ PHP_METHOD(pdo_user,parsesql)
 		if (token.id != PU_WHITESPACE) {
 			php_pdo_user_sql_parser(pParser, token.id, token, return_value);
 		}
-		if (Z_TYPE_P(return_value) == IS_BOOL) {
+		if (Z_TYPE_P(return_value) == IS_FALSE) {
 			/* FALSE implied */
 			php_error_docref(NULL TSRMLS_CC, E_WARNING, "Failure parsing SQL statement at: %s", token.token);
 			php_pdo_user_sql_parserFree(pParser, pdo_user_free_wrapper);
@@ -325,6 +324,7 @@ PHP_METHOD(pdo_user,parsesql)
 	}
 	php_pdo_user_sql_parser(pParser, 0, token, return_value);
 	php_pdo_user_sql_parserFree(pParser, pdo_user_free_wrapper);
+#endif
 }
 /* }}} */
 
@@ -333,44 +333,44 @@ static zend_class_entry *php_pdo_user_driver_interface;
 static zend_class_entry *php_pdo_user_statement_interface;
 
 static zend_function_entry php_pdo_user_class_functions[] = {
-	PHP_ME(pdo_user,		driverparam,						NULL,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-	PHP_MALIAS(pdo_user,	statementparam,		driverparam,	NULL,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-	PHP_ME(pdo_user,		parsedsn,							NULL,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-	PHP_ME(pdo_user,		tokenizesql,						NULL,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-	PHP_ME(pdo_user,		tokenname,							NULL,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-	PHP_ME(pdo_user,		parsesql,							NULL,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(pdo_user,		driverparam,						arginfo_class_PDO_User_driverParam,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_MALIAS(pdo_user,	statementparam,		driverparam,	arginfo_class_PDO_User_driverParam,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(pdo_user,		parsedsn,							arginfo_class_PDO_User_parseDSN,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(pdo_user,		tokenizesql,						arginfo_class_PDO_User_tokenizeSQL,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(pdo_user,		tokenname,							arginfo_class_PDO_User_tokenName,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(pdo_user,		parsesql,							arginfo_class_PDO_User_parseSQL,	ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	{ NULL, NULL, NULL }
 };
 
 static zend_function_entry php_pdo_user_driver_interface_functions[] = {
-	PHP_ABSTRACT_ME(pdo_user_driver,			__construct,			NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_close,				NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_prepare,			NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_do,					NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_quote,				NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_begin,				NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_commit,				NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_rollback,			NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_setattribute,		NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_lastinsertid,		NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_fetcherror,			NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_getattribute,		NULL)
-	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_checkliveness,		NULL)
+	PHP_ABSTRACT_ME(pdo_user_driver,			__construct,			arginfo_class_PDO_User_Driver___construct)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_close,				arginfo_class_PDO_User_Driver_pdo_close)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_prepare,			arginfo_class_PDO_User_Driver_pdo_prepare)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_do,					arginfo_class_PDO_User_Driver_pdo_do)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_quote,				arginfo_class_PDO_User_Driver_pdo_quote)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_begin,				arginfo_class_PDO_User_Driver_pdo_begin)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_commit,				arginfo_class_PDO_User_Driver_pdo_commit)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_rollback,			arginfo_class_PDO_User_Driver_pdo_rollback)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_setattribute,		arginfo_class_PDO_User_Driver_pdo_setAttribute)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_lastinsertid,		arginfo_class_PDO_User_Driver_pdo_lastInsertID)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_fetcherror,			arginfo_class_PDO_User_Driver_pdo_fetchError)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_getattribute,		arginfo_class_PDO_User_Driver_pdo_getAttribute)
+	PHP_ABSTRACT_ME(pdo_user_driver,			pdo_checkliveness,		arginfo_class_PDO_User_Driver_pdo_checkLiveness)
 	{ NULL, NULL, NULL }
 };
 
 static zend_function_entry php_pdo_user_statement_interface_functions[] = {
-	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_close,				NULL)
-	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_execute,			NULL)
-	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_fetch,				NULL)
-	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_describe,			NULL)
-	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_getcol,				NULL)
-	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_paramhook,			NULL)
-	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_setattribute,		NULL)
-	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_getattribute,		NULL)
-	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_colmeta,			NULL)
-	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_nextrowset,			NULL)
-	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_closecursor,		NULL)
+	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_close,				arginfo_class_PDO_User_Statement_pdo_close)
+	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_execute,			arginfo_class_PDO_User_Statement_pdo_execute)
+	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_fetch,				arginfo_class_PDO_User_Statement_pdo_fetch)
+	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_describe,			arginfo_class_PDO_User_Statement_pdo_describe)
+	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_getcol,				arginfo_class_PDO_User_Statement_pdo_getcol)
+	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_paramhook,			arginfo_class_PDO_User_Statement_pdo_paramhook)
+	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_setattribute,		arginfo_class_PDO_User_Statement_pdo_setAttribute)
+	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_getattribute,		arginfo_class_PDO_User_Statement_pdo_getAttribute)
+	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_colmeta,			arginfo_class_PDO_User_Statement_pdo_colmeta)
+	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_nextrowset,			arginfo_class_PDO_User_Statement_pdo_nextRowset)
+	PHP_ABSTRACT_ME(pdo_user_statement,			pdo_closecursor,		arginfo_class_PDO_User_Statement_pdo_closeCursor)
 	{ NULL, NULL, NULL }
 };
 

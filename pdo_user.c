@@ -89,7 +89,7 @@ void *php_pdo_user_ptrmap_locate(zval *object TSRMLS_DC)
 	}
 
 	while (el) {
-		if (el->data->object == object) {
+		if (Z_OBJ_HANDLE(el->data->object) == Z_OBJ_HANDLE_P(object)) {
 			return el->data;
 		}
 		el = el->next;

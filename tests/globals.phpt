@@ -17,9 +17,9 @@ class PDO_User_Globals_Statement implements PDO_User_Statement {
 	private $cursor = NULL;
 	private $varname = NULL;
 
-	function pdo_close() { }
+	function pdo_close(): void { }
 
-	function pdo_execute() {
+	function pdo_execute(): array|false {
 		$query = PDO_User::statementParam($this, PDO_User::STATEMENT_PARAM_ACTIVE_QUERY);
 		if (preg_match('/^SELECT FROM "(.*?)"$/i', $query, $matches)) {
 			$this->fetched = false;
@@ -38,7 +38,7 @@ class PDO_User_Globals_Statement implements PDO_User_Statement {
 		return false;
 	}
 
-	function pdo_fetch($ori, $fetch) {
+	function pdo_fetch(int $ori, int $fetch): bool {
 		switch ($ori) {
 			case PDO::FETCH_ORI_NEXT:
 				if ($this->fetched) {
@@ -133,11 +133,11 @@ class PDO_User_Globals_Statement implements PDO_User_Statement {
 		return false;
 	}
 
-	function pdo_describe($col) {
+	function pdo_describe(int $col): array {
 		return array('name'=>$this->varname,'maxlen'=>0x7FFFFFFF, 'precision'=>0);
 	}
 
-	function pdo_getCol($col) {
+	function pdo_getCol(int $col): array {
 		if (is_array($this->cursor)) {
 			return current($this->cursor);
 		} else {
@@ -145,16 +145,16 @@ class PDO_User_Globals_Statement implements PDO_User_Statement {
 		}
 	}
 
-	function pdo_paramHook($type, $colno, $paramname, $is_param, &$param) { }
-	function pdo_getAttribute($attr) { return NULL; }
-	function pdo_setAttribute($attr, $val) { return false; }
-	function pdo_colMeta($col) {
+	function pdo_paramHook(int $type, int $colno, string $paramname, bool $is_param, mixed &$param): void { }
+	function pdo_getAttribute(int $attr): mixed { return NULL; }
+	function pdo_setAttribute(int $attr, mixed $val): bool { return false; }
+	function pdo_colMeta(int $col): array {
 		return array('table'=>'global_symbol_table', 'type'=>gettype($this->cursor));
 	}
-	function pdo_nextRowset() {
+	function pdo_nextRowset(): bool {
 		return $this->fetch(PDO::FETCH_ORI_NEXT, 1);
 	}
-	function pdo_closeCursor() {
+	function pdo_closeCursor(): bool {
 		$this->cursor = NULL;
 	}
 }
@@ -191,13 +191,13 @@ class PDO_User_Globals_Driver implements PDO_User_Driver {
 	/* PDO Driver Implementation */
 
 	function __construct($dsn, $user, $pass, $options) { }
-	function pdo_close() { }
+	function pdo_close(): void { }
 
-	function pdo_prepare($sql, $options) {
+	function pdo_prepare($sql, $options): false|PDO_User_Statement {
 		return new PDO_User_Globals_Statement($sql, $options);
 	}
 		
-	function pdo_do($sql) {
+	function pdo_do(string $sql): false|int {
 		if (preg_match('/^INSERT "(.*?)" as "(.*?)"$/i', $sql, $matches)) {
 			return $this->insert($matches[1], $matches[2]);
 		} elseif (preg_match('/^UPDATE "(.*?)" to "(.*?)"$/i', $sql, $matches)) {
@@ -210,22 +210,22 @@ class PDO_User_Globals_Driver implements PDO_User_Driver {
 	 	return false;
 	}
 
-	function pdo_quote($str) {
+	function pdo_quote(string $str): string {
 		return '"' . addslashes($str) . '"';
 	}
 
-	function pdo_begin() { return false; }
-	function pdo_commit() { return false; }
-	function pdo_rollback() { return false; }
-	function pdo_setAttribute($attr, $val) { return false; }
-	function pdo_getAttribute($attr) { return NULL; }
-	function pdo_lastInsertID($seq) { return $this->lastInsert; }
+	function pdo_begin(): bool { return false; }
+	function pdo_commit(): bool { return false; }
+	function pdo_rollback(): bool { return false; }
+	function pdo_setAttribute(int $attr, mixed $val): bool { return false; }
+	function pdo_getAttribute(int $attr): mixed { return NULL; }
+	function pdo_lastInsertID(string $seq): string { return $this->lastInsert; }
 
-	function pdo_fetchError() {
+	function pdo_fetchError(): array {
 		return array($this->errorCode, $this->errorDesc);
 	}
 
-	function pdo_checkLiveness() { return true; }
+	function pdo_checkLiveness(): bool { return true; }
 }
 
 $preset = 'Some Value';

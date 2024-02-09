@@ -1,0 +1,16 @@
+config.h
+config.h.in
+.vscode/
+build/
+.libs/
+*.dep
+*.lo
+autom4te.cache/
+Makefile*
+config.log
+config.nice
+config.status
+configure
+configure.ac
+libtool
+run-tests.php

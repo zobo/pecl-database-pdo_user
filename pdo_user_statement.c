@@ -40,46 +40,24 @@
 static inline long php_pdo_user_long_from_assoc(HashTable *ht, char *key, size_t key_len)
 {
 	long ret = 0;
-	zval **tmp;
+	zval *tmp;
 
-	if (zend_hash_find(ht, key, key_len, (void**)&tmp) == SUCCESS) {
-		switch (Z_TYPE_PP(tmp)) {
-			case IS_NULL: ret = 0; break;
-			case IS_BOOL: ret = Z_BVAL_PP(tmp) ? 1 : 0; break;
-			case IS_LONG: ret = Z_LVAL_PP(tmp); break;
-			case IS_DOUBLE: ret = (long)Z_DVAL_PP(tmp); break;
-			default:
-			{
-				zval copyval = **tmp;
-				zval_copy_ctor(&copyval);
-				convert_to_long(&copyval);
-				ret = Z_LVAL(copyval);
-			}
-		}
+	if ((tmp = zend_hash_str_find(ht, key, key_len)) != NULL) {
+		ret = zval_get_long(tmp);
 	}
 
 	return ret;
 }
 
-static inline char *php_pdo_user_string_from_assoc(HashTable *ht, char *key, size_t key_len, int *len)
+static inline zend_string *php_pdo_user_string_from_assoc(HashTable *ht, char *key, size_t key_len)
 {
-	zval **tmp;
+	zval *tmp;
 
-	if (zend_hash_find(ht, key, key_len, (void**)&tmp) == SUCCESS) {
-		if (Z_TYPE_PP(tmp) == IS_STRING) {
-			*len = Z_STRLEN_PP(tmp);
-			return estrndup(Z_STRVAL_PP(tmp), Z_STRLEN_PP(tmp));
-		} else {
-			zval copyval = **tmp;
-			zval_copy_ctor(&copyval);
-			convert_to_string(&copyval);
-			*len = Z_STRLEN(copyval);
-			return Z_STRVAL(copyval);
-		}
+	if ((tmp = zend_hash_str_find(ht, key, key_len)) != NULL) {
+		return zval_get_string(tmp);
 	}
 
-	*len = 0;
-	return estrndup("", 0);
+	return zend_string_init("", 0, 0);
 }
 
 static int php_pdo_user_stmt_dtor(pdo_stmt_t *stmt TSRMLS_DC)
@@ -89,15 +67,15 @@ static int php_pdo_user_stmt_dtor(pdo_stmt_t *stmt TSRMLS_DC)
 	if (data) {
 		zval fname, retval;
 
-		ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_CLOSER, sizeof(PHP_PDO_USER_STMT_CLOSER) - 1, 0);
-		if (call_user_function(EG(function_table), &(data->object), &fname, &retval, 0, NULL TSRMLS_CC) == SUCCESS) {
+		ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_CLOSER, sizeof(PHP_PDO_USER_STMT_CLOSER) - 1);
+		if (call_user_function(EG(function_table), &data->object, &fname, &retval, 0, NULL TSRMLS_CC) == SUCCESS) {
 			/* Ignore retval */
 			zval_dtor(&retval);
 		}
 
 		php_pdo_user_ptrmap_unmap(data TSRMLS_CC);
 
-		zval_ptr_dtor(&(data->object));
+		zval_ptr_dtor(&data->object);
 		efree(data);
 
 		stmt->driver_data = NULL;
@@ -111,9 +89,9 @@ static int php_pdo_user_stmt_execute(pdo_stmt_t *stmt TSRMLS_DC)
 	php_pdo_user_data *data = (php_pdo_user_data*)stmt->driver_data;
 	zval fname, retval;
 
-	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_EXECUTE, sizeof(PHP_PDO_USER_STMT_EXECUTE) - 1, 0);
+	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_EXECUTE, sizeof(PHP_PDO_USER_STMT_EXECUTE) - 1);
 
-	if (call_user_function(EG(function_table), &(data->object), &fname, &retval, 0, NULL TSRMLS_CC) == FAILURE) {
+	if (call_user_function(EG(function_table), &data->object, &fname, &retval, 0, NULL TSRMLS_CC) == FAILURE) {
 		return 0; /* FAILURE */
 	}
 
@@ -137,20 +115,18 @@ static int php_pdo_user_stmt_execute(pdo_stmt_t *stmt TSRMLS_DC)
 	return 1; /* SUCCESS */
 }
 
-static int php_pdo_user_stmt_fetch(pdo_stmt_t *stmt, enum pdo_fetch_orientation ori, long offset TSRMLS_DC)
+static int php_pdo_user_stmt_fetch(pdo_stmt_t *stmt, enum pdo_fetch_orientation ori, zend_long offset TSRMLS_DC)
 {
 	php_pdo_user_data *data = (php_pdo_user_data*)stmt->driver_data;
-	zval fname, retval, *args[2];
+	zval fname, retval, args[2];
 
-	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_FETCH, sizeof(PHP_PDO_USER_STMT_FETCH) - 1, 0);
+	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_FETCH, sizeof(PHP_PDO_USER_STMT_FETCH) - 1);
 
-	MAKE_STD_ZVAL(args[0]);
-	ZVAL_LONG(args[0], ori);
+	ZVAL_LONG(&args[0], ori);
 
-	MAKE_STD_ZVAL(args[1]);
-	ZVAL_LONG(args[1], offset);
+	ZVAL_LONG(&args[1], offset);
 
-	if (call_user_function(EG(function_table), &(data->object), &fname, &retval, 2, args TSRMLS_CC) == FAILURE) {
+	if (call_user_function(EG(function_table), &data->object, &fname, &retval, 2, args TSRMLS_CC) == FAILURE) {
 		zval_ptr_dtor(&args[0]);
 		zval_ptr_dtor(&args[1]);
 		return 0; /* FAILURE */
@@ -160,68 +136,63 @@ static int php_pdo_user_stmt_fetch(pdo_stmt_t *stmt, enum pdo_fetch_orientation 
 
 	convert_to_boolean(&retval);
 
-	return Z_BVAL(retval);
+	return Z_TYPE(retval) == IS_TRUE;
 }
 
 static int php_pdo_user_stmt_describe(pdo_stmt_t *stmt, int colno TSRMLS_DC)
 {
 	php_pdo_user_data *data = (php_pdo_user_data*)stmt->driver_data;
-	zval fname, retval, *zcolno;
+	zval fname, retval, args[1];
 	int len;
 
-	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_DESCRIBE, sizeof(PHP_PDO_USER_STMT_DESCRIBE) - 1, 0);
+	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_DESCRIBE, sizeof(PHP_PDO_USER_STMT_DESCRIBE) - 1);
 
-	MAKE_STD_ZVAL(zcolno);
-	ZVAL_LONG(zcolno, colno);
+	ZVAL_LONG(&args[0], colno);
 
-	if (call_user_function(EG(function_table), &(data->object), &fname, &retval, 1, &zcolno TSRMLS_CC) == FAILURE) {
-		zval_ptr_dtor(&zcolno);
+	if (call_user_function(EG(function_table), &data->object, &fname, &retval, 1, args TSRMLS_CC) == FAILURE) {
+		zval_ptr_dtor(&args[0]);
 		return 0;
 	}
-	zval_ptr_dtor(&zcolno);
+	zval_ptr_dtor(&args[0]);
 
 	if (Z_TYPE(retval) != IS_ARRAY) {
 		/* throw an exception */
 		zval_dtor(&retval);
 
-		stmt->columns[colno].namelen = spprintf(&stmt->columns[colno].name, 0, PHP_PDO_USER_STMT_UNKNOWN_COL_PREFIX "%d", colno);
+		stmt->columns[colno].name = zend_strpprintf(100, PHP_PDO_USER_STMT_UNKNOWN_COL_PREFIX "%d", colno);
 		stmt->columns[colno].maxlen = 0xffffffff;
 		stmt->columns[colno].precision = 0;
-		stmt->columns[colno].param_type = PDO_PARAM_STR;
 		return 0;
 	}
 
-	stmt->columns[colno].name = php_pdo_user_string_from_assoc(Z_ARRVAL(retval), "name", sizeof("name"), &len);
-	stmt->columns[colno].namelen = len;
+	stmt->columns[colno].name = php_pdo_user_string_from_assoc(Z_ARRVAL(retval), "name", sizeof("name"));
 	stmt->columns[colno].maxlen = php_pdo_user_long_from_assoc(Z_ARRVAL(retval), "maxlen", sizeof("maxlen"));
 	stmt->columns[colno].precision = php_pdo_user_long_from_assoc(Z_ARRVAL(retval), "precision", sizeof("precision"));
-	stmt->columns[colno].param_type = PDO_PARAM_STR;
 
 	zval_dtor(&retval);
 
 	return 1; /* SUCCESS */
 }
 
-static int php_pdo_user_stmt_get_col(pdo_stmt_t *stmt, int colno, char **ptr, unsigned long *len, int *caller_frees TSRMLS_DC)
+static int php_pdo_user_stmt_get_col(pdo_stmt_t *stmt, int colno, zval *result, enum pdo_param_type *type TSRMLS_DC)
 {
 	php_pdo_user_data *data = (php_pdo_user_data*)stmt->driver_data;
-	zval fname, retval, *zcolno;
+	zval fname, retval, args[1];
 
-	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_GET_COL, sizeof(PHP_PDO_USER_STMT_GET_COL) - 1, 0);
+	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_GET_COL, sizeof(PHP_PDO_USER_STMT_GET_COL) - 1);
 
-	MAKE_STD_ZVAL(zcolno);
-	ZVAL_LONG(zcolno, colno);
+	ZVAL_LONG(&args[0], colno);
 
-	if (call_user_function(EG(function_table), &(data->object), &fname, &retval, 1, &zcolno TSRMLS_CC) == FAILURE) {
-		zval_ptr_dtor(&zcolno);
+	if (call_user_function(EG(function_table), &data->object, &fname, &retval, 1, args TSRMLS_CC) == FAILURE) {
+		zval_ptr_dtor(&args[0]);
 		return 0;
 	}
-	zval_ptr_dtor(&zcolno);
+	zval_ptr_dtor(&args[0]);
 
-	convert_to_string(&retval);
-	*ptr = Z_STRVAL(retval);
-	*len = Z_STRLEN(retval);
-	*caller_frees = 1;
+	// convert_to_string(&retval);
+	// convert according to type ?
+	ZVAL_COPY(result, &retval);
+	// ZVAL_DUP(result, &retval);
 
 	return 1; /* SUCCESS */
 }
@@ -229,7 +200,7 @@ static int php_pdo_user_stmt_get_col(pdo_stmt_t *stmt, int colno, char **ptr, un
 static int php_pdo_user_stmt_param_hook(pdo_stmt_t *stmt, struct pdo_bound_param_data *param, enum pdo_param_event event_type TSRMLS_DC)
 {
 	php_pdo_user_data *data = (php_pdo_user_data*)stmt->driver_data;
-	zval fname, *args[5], retval;
+	zval fname, args[5], retval;
 
 	switch(event_type) {
 		case PDO_PARAM_EVT_EXEC_PRE:
@@ -241,26 +212,23 @@ static int php_pdo_user_stmt_param_hook(pdo_stmt_t *stmt, struct pdo_bound_param
 			return 1; /* Don't handle other methods */
 	}
 
-	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_PARAM_HOOK, sizeof(PHP_PDO_USER_STMT_PARAM_HOOK) - 1, 0);
+	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_PARAM_HOOK, sizeof(PHP_PDO_USER_STMT_PARAM_HOOK) - 1);
 
 	/* $event, $num, $name, $is_param, &$param */
-	MAKE_STD_ZVAL(args[0]);
-	ZVAL_LONG(args[0], event_type);
+	ZVAL_LONG(&args[0], event_type);
 
-	MAKE_STD_ZVAL(args[1]);
-	ZVAL_LONG(args[1], param->paramno);
+	ZVAL_LONG(&args[1], param->paramno);
 
-	ALLOC_INIT_ZVAL(args[2]);
+	ZVAL_NULL(&args[2]);
 	if (param->name) {
-		ZVAL_STRINGL(args[2], param->name, param->namelen, 1);
+		ZVAL_STR(&args[2], param->name);
 	}
 
-	MAKE_STD_ZVAL(args[3]);
-	ZVAL_BOOL(args[3], param->is_param);
+	ZVAL_BOOL(&args[3], param->is_param);
 
 	args[4] = param->parameter;
 
-	if (call_user_function(EG(function_table), &(data->object), &fname, &retval, 5, args TSRMLS_CC) == FAILURE) {
+	if (call_user_function(EG(function_table), &data->object, &fname, &retval, 5, args TSRMLS_CC) == FAILURE) {
 		zval_ptr_dtor(&args[0]);
 		zval_ptr_dtor(&args[1]);
 		zval_ptr_dtor(&args[2]);
@@ -276,67 +244,64 @@ static int php_pdo_user_stmt_param_hook(pdo_stmt_t *stmt, struct pdo_bound_param
 	return 1; /* SUCCESS */
 }
 
-static int php_pdo_user_stmt_set_attr(pdo_stmt_t *stmt, long attr, zval *val TSRMLS_DC)
+static int php_pdo_user_stmt_set_attr(pdo_stmt_t *stmt, zend_long attr, zval *val TSRMLS_DC)
 {
 	php_pdo_user_data *data = (php_pdo_user_data*)stmt->driver_data;
-	zval fname, *zargs[2], retval;
+	zval fname, args[2], retval;
 
-	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_SET_ATTR, sizeof(PHP_PDO_USER_STMT_SET_ATTR) - 1, 0);
+	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_SET_ATTR, sizeof(PHP_PDO_USER_STMT_SET_ATTR) - 1);
 
-	MAKE_STD_ZVAL(zargs[0]);
-	ZVAL_LONG(zargs[0], attr);
+	ZVAL_LONG(&args[0], attr);
 
-	zargs[1] = val;
+	args[1] = *val;
 
-	if (call_user_function(EG(function_table), &(data->object), &fname, &retval, 2, zargs TSRMLS_CC) == SUCCESS) {
+	if (call_user_function(EG(function_table), &data->object, &fname, &retval, 2, args TSRMLS_CC) == SUCCESS) {
 		convert_to_boolean(&retval);
     } else {
 		ZVAL_FALSE(&retval);
     }
 
-	zval_ptr_dtor(&zargs[0]);
+	zval_ptr_dtor(&args[0]);
 
-	return Z_BVAL(retval);
+	return Z_TYPE(retval) == IS_TRUE;
 }
 
-static int php_pdo_user_stmt_get_attr(pdo_stmt_t *stmt, long attr, zval *val TSRMLS_DC)
+static int php_pdo_user_stmt_get_attr(pdo_stmt_t *stmt, zend_long attr, zval *val TSRMLS_DC)
 {
 	php_pdo_user_data *data = (php_pdo_user_data*)stmt->driver_data;
-	zval fname, *zattr;
+	zval fname, args[1];
 	int ret = 1; /* SUCCESS */
 
-	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_GET_ATTR, sizeof(PHP_PDO_USER_STMT_GET_ATTR) - 1, 0);
+	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_GET_ATTR, sizeof(PHP_PDO_USER_STMT_GET_ATTR) - 1);
 
-	MAKE_STD_ZVAL(zattr);
-	ZVAL_LONG(zattr, attr);
+	ZVAL_LONG(&args[0], attr);
 
-	if (call_user_function(EG(function_table), &(data->object), &fname, val, 1, &zattr TSRMLS_CC) == FAILURE) {
+	if (call_user_function(EG(function_table), &data->object, &fname, val, 1, args TSRMLS_CC) == FAILURE) {
 		ZVAL_NULL(val);
 		ret = 0; /* FAILURE */
 	}
 
-	zval_ptr_dtor(&zattr);
+	zval_ptr_dtor(&args[0]);
 
 	return ret;
 }
 
-static int php_pdo_user_stmt_col_meta(pdo_stmt_t *stmt, long colno, zval *return_value TSRMLS_DC)
+static int php_pdo_user_stmt_col_meta(pdo_stmt_t *stmt, zend_long colno, zval *return_value TSRMLS_DC)
 {
 	php_pdo_user_data *data = (php_pdo_user_data*)stmt->driver_data;
-	zval fname, *zcolno;
+	zval fname, args[1];
 	int ret = 1; /* SUCCESS */
 
-	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_COL_META, sizeof(PHP_PDO_USER_STMT_COL_META) - 1, 0);
+	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_COL_META, sizeof(PHP_PDO_USER_STMT_COL_META) - 1);
 
-	MAKE_STD_ZVAL(zcolno);
-	ZVAL_LONG(zcolno, colno);
+	ZVAL_LONG(&args[0], colno);
 
-	if (call_user_function(EG(function_table), &(data->object), &fname, return_value, 1, &zcolno TSRMLS_CC) == FAILURE) {
+	if (call_user_function(EG(function_table), &data->object, &fname, return_value, 1, args TSRMLS_CC) == FAILURE) {
 		ZVAL_NULL(return_value);
 		ret = 0; /* FAILURE */
 	}
 
-	zval_ptr_dtor(&zcolno);
+	zval_ptr_dtor(&args[0]);
 
 	return ret;
 }
@@ -346,14 +311,14 @@ static int php_pdo_user_stmt_next_rowset(pdo_stmt_t *stmt TSRMLS_DC)
 	php_pdo_user_data *data = (php_pdo_user_data*)stmt->driver_data;
 	zval fname, retval;
 
-	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_NEXT_ROWSET, sizeof(PHP_PDO_USER_STMT_NEXT_ROWSET) - 1, 0);
+	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_NEXT_ROWSET, sizeof(PHP_PDO_USER_STMT_NEXT_ROWSET) - 1);
 
-	if (call_user_function(EG(function_table), &(data->object), &fname, &retval, 0, NULL TSRMLS_CC) == FAILURE) {
+	if (call_user_function(EG(function_table), &data->object, &fname, &retval, 0, NULL TSRMLS_CC) == FAILURE) {
 		return 0; /* FAILURE */
 	}
 	convert_to_boolean(&retval);
 
-	return Z_BVAL(retval);
+	return Z_TYPE(retval) == IS_TRUE;
 }
 
 static int php_pdo_user_stmt_cursor_closer(pdo_stmt_t *stmt TSRMLS_DC)
@@ -361,14 +326,14 @@ static int php_pdo_user_stmt_cursor_closer(pdo_stmt_t *stmt TSRMLS_DC)
 	php_pdo_user_data *data = (php_pdo_user_data*)stmt->driver_data;
 	zval fname, retval;
 
-	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_CURSOR_CLOSER, sizeof(PHP_PDO_USER_STMT_CURSOR_CLOSER) - 1, 0);
+	ZVAL_STRINGL(&fname, PHP_PDO_USER_STMT_CURSOR_CLOSER, sizeof(PHP_PDO_USER_STMT_CURSOR_CLOSER) - 1);
 
-	if (call_user_function(EG(function_table), &(data->object), &fname, &retval, 0, NULL TSRMLS_CC) == FAILURE) {
+	if (call_user_function(EG(function_table), &data->object, &fname, &retval, 0, NULL TSRMLS_CC) == FAILURE) {
 		return 0; /* FAILURE */
 	}
 	convert_to_boolean(&retval);
 
-	return Z_BVAL(retval);
+	return Z_TYPE(retval) == IS_TRUE;
 }
 
 struct pdo_stmt_methods php_pdo_user_stmt_methods = {

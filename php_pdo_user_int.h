@@ -25,6 +25,12 @@
 #include "pdo/php_pdo.h"
 #include "pdo/php_pdo_driver.h"
 
+// hack for obsolete TSRMLS_
+#define TSRMLS_DC
+#define TSRMLS_D
+#define TSRMLS_C
+#define TSRMLS_CC
+
 typedef struct _php_pdo_user_llist php_pdo_user_llist;
 
 ZEND_BEGIN_MODULE_GLOBALS(pdo_user)
@@ -40,7 +46,7 @@ extern ZEND_DECLARE_MODULE_GLOBALS(pdo_user);
 #endif
 
 typedef struct _php_pdo_user_data {
-	zval *object;
+	zval object;
 	pdo_dbh_t *dbh;
 	pdo_stmt_t *stmt;
 } php_pdo_user_data;
